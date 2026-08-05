@@ -1,0 +1,60 @@
+[project]
+name = "bookpolicy"
+version = "0.0.2"
+description = "Dependency-free scoring terms for deciding whether to open, close, or hold, given a book of options positions."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Michael Anderson" }]
+keywords = ["options", "trading", "portfolio", "risk", "greeks", "position-sizing"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Typing :: Typed",
+]
+# Deliberately dependency-free, and it must never import the application that
+# uses it: "how much of this should I hold, given what I already hold" is not a
+# fact about any one trading system.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/endthestart/bookpolicy"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bookpolicy"]
+
+[tool.ruff]
+# Carried deliberately so the package lints identically inside a workspace and as
+# a standalone repo. Without it a contributor's `ruff check --fix` reformats the
+# codebase against conventions it cannot see.
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+ignore = [
+    # Decimal('100') -> Decimal(100). Rejected on purpose: "the argument to
+    # Decimal is always a string" is a bright line a reviewer can check by eye,
+    # and it makes the real bug class -- Decimal(0.30), which silently binds a
+    # binary float to money -- impossible to write by habit.
+    "FURB157",
+    # dict(a=1) over {'a': 1} is used where the keys are keyword-ish; harmless.
+    "C408",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["bookpolicy"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert on private helpers and compare against literal expectations.
+"tests/**" = ["S101", "PLR2004"]
+"examples/**" = ["T201"]        # examples print; that is the point
