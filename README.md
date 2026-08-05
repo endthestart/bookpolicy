@@ -1,0 +1,116 @@
+# bookpolicy
+
+Dependency-free scoring for the question "given what I already hold, is this
+action worth taking?" over a book of options positions.
+
+Most options tooling scores a candidate standalone: this spread has a 70%
+probability of profit, that one collects more credit, take the better number. Once
+you hold something that is the wrong comparison, because the same spread helps one
+book and hurts another. bookpolicy scores an action against a book and a target,
+and puts opening, closing, and doing nothing on one scale.
+
+- No dependencies. Stdlib and `Decimal`. No pandas, no numpy, no broker SDK, no
+  network or disk I/O, and no knowledge of the calling application.
+- Every score carries a plain-language rationale alongside the number.
+- No term may read unrealized P&L. `assert_pnl_blind` perturbs the book's P&L and
+  raises if any term's score moves, so the property is checked rather than assumed.
+
+```python
+from decimal import Decimal as D
+from bookpolicy import (Book, Holding, Greeks, Open, Close, Hold, Target,
+                        DeltaGap, ThetaYield, GammaTheta, TransactionCost, score)
+
+book = Book(
+    holdings=(Holding(id='pcs-aug', greeks=Greeks(delta=D('1700'), theta=D('9'),
+                                                  gamma=D('-2.4')),
+                      margin=D('500'), days_to_expiry=9),),
+    net_liq=D('30000'),
+)
+target = Target.like_holding_the_underlying(
+    D('30000'), invested_ratio=D('1.0'), band_ratio=D('0.4'))
+terms = (DeltaGap(D('1')), ThetaYield(D('100')), GammaTheta(D('1')), TransactionCost(D('0.01')))
+
+candidate = Open('put_credit_spread',
+                 greeks=Greeks(delta=D('19200'), theta=D('7')),
+                 margin=D('500'), cost=D('2.24'))
+
+total, parts = score(book, candidate, terms, target)
+for p in parts:
+    if p.value:
+        print(f'{p.term:<18}{p.value:+8.3f}  {p.rationale}')
+# delta_gap           +1.600  closes the delta gap by $19,200 ($28,300 → $9,100 from a $12,000 band)
+# theta_yield         +1.400  collects $7.00/day against $500 of capital (1.400%/day)
+# transaction_cost    -0.022  costs $2.24 in fees and crossing
+```
+
+Every term reports on every call. `gamma_theta` returned `+0.000 "not a close"`
+here and is filtered out above.
+
+`examples/score_a_book.py` runs the full open/close/hold comparison with no data
+source.
+
+## Model
+
+| Piece | What it is |
+|---|---|
+| `Greeks` | dollar-denominated delta / theta / gamma / vega; adds and negates |
+| `Holding` | one position: greeks, margin, days to expiry, entry credit, cost to close |
+| `Book` | everything held, plus the capital it is held against |
+| `Target` | the book shape being steered toward, plus a no-trade band |
+| `Open` / `Close` / `Hold` | the three actions, scored on one scale |
+| `Contribution` | one term's signed value and its rationale |
+| `TaxTreatment` | whether realizing a gain is a choice (see below) |
+| `score(book, action, terms, target)` | `(total, contributions)`, never just the total |
+| `assert_pnl_blind(...)` | raises `PnlLeakError` if any term reads unrealized P&L |
+
+Bundled terms: `DeltaGap` (distance to target, flat inside the band),
+`ThetaYield` (decay per dollar of capital), `GammaTheta` (exit pressure as gamma
+outruns remaining decay), `TransactionCost`. A term is anything with a `name` and
+a `contribute(book, action, target)`, so callers can add their own.
+
+## Prior work
+
+The terms implement established results rather than new ones:
+
+- No-trade bands (Constantinides 1986; Davis & Norman 1990). With transaction
+  costs the optimal policy is not to hold the target exactly but to do nothing
+  inside a band around it. `DeltaGap` is flat at zero inside `Target.delta_band`,
+  which is what allows frequent evaluation without churning on noise.
+- Partial adjustment toward an aim (Gârleanu & Pedersen 2013). Trade toward a
+  target, paying costs against the improvement. `Target` is the aim;
+  `TransactionCost` is what makes partial adjustment fall out rather than be
+  imposed.
+- Inventory skewing (Avellaneda & Stoikov 2008). A market maker's quotes lean on
+  inventory, never on whether the position is up or down. `assert_pnl_blind`
+  enforces the same separation.
+- The disposition effect (Shefrin & Statman 1985) is the failure mode being
+  guarded against: riding losers and cutting winners, which a P&L-reading term
+  reproduces while still looking like a risk model.
+
+`GammaTheta` and the 21-DTE rule: the industry heuristic "manage at 21 DTE" is an
+output of this term rather than an input. The stated reason for the rule is that
+the last three weeks carry disproportionate gamma against the theta still
+collectable, which is a ratio rather than a date. Computing it recovers "close
+near 21 DTE" on typical inputs and adapts when they are not typical.
+
+## Two design choices
+
+No financial defaults. `Target.like_holding_the_underlying` requires both ratios
+as keyword arguments and defaults neither. A default agreeing with a threshold the
+caller keeps elsewhere would put the same number in two places.
+
+Tax treatment is configuration. "Unrealized P&L is not a decision input" has one
+real exception: under realization accounting, cost basis becomes relevant near the
+year boundary. Under mark-to-market it does not, since the result lands in the
+year's income whether or not the position was closed. `TaxTreatment` carries the
+distinction so it stays a property of the holder rather than an assumption inside
+a term.
+
+## Scope
+
+Scoring only. No broker, no data fetching, no order placement, no position sizing,
+no backtester, and no view on whether the top-ranked action is one you should take.
+
+## License
+
+MIT.
