@@ -84,17 +84,12 @@ class DeltaGap:
 
 @dataclass(frozen=True, slots=True)
 class GammaTheta:
-    """Exit pressure from gamma risk outrunning the decay still to be collected.
+    """Legacy local-sensitivity diagnostic, not an economic exit criterion.
 
-    The industry "manage at 21 DTE" heuristic is an output of this term rather than
-    an input. The stated reason for that rule is that the last three weeks carry
-    disproportionate gamma against the theta still available, which is a ratio
-    rather than a date. Computing it recovers "close near 21 DTE" on typical inputs
-    and adapts when they are not typical; a calendar rule cannot tell a calm tape
-    from a violent one.
-
-    Applies only to closing. Unrealized P&L is deliberately not an input, the
-    position being red is not a reason to act.
+    Theta times remaining days is a linear extrapolation, not expected decay.
+    The ratio has units and no calibrated link to an optimal management date.
+    Positive gamma and nonpositive theta provide no short-gamma diagnostic.
+    Use complete scenario valuations for economic comparisons.
     """
 
     weight: Decimal = Decimal('1')
@@ -105,16 +100,15 @@ class GammaTheta:
             return Contribution(self.name, _ZERO, 'not a close')
         h = book.holding(action.holding_id)
         remaining = h.greeks.theta * h.days_to_expiry
-        if remaining <= 0:
+        if h.greeks.theta <= 0 or h.days_to_expiry <= 0 or h.greeks.gamma >= 0:
             return Contribution(
-                self.name, self.weight,
-                f'no decay left to collect over {h.days_to_expiry}d, '
-                f'closing costs nothing in theta')
-        pressure = abs(h.greeks.gamma) / remaining
+                self.name, _ZERO, 'short-gamma/positive-theta diagnostic unavailable; '
+                'no economic close benefit inferred')
+        pressure = -h.greeks.gamma / remaining
         return Contribution(
             self.name, self.weight * pressure,
-            f'gamma {h.greeks.gamma:+,.2f} against ${remaining:,.0f} of decay still '
-            f'to collect over {h.days_to_expiry}d (ratio {pressure:.3f})')
+            f'gamma {h.greeks.gamma:+,.2f} divided by linear theta × '
+            f'{h.days_to_expiry}d (${remaining:,.0f}); uncalibrated ratio {pressure:.3f}')
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,29 +175,17 @@ class ThetaYield:
 def assert_pnl_blind(
     book: Book, action: Action, terms: tuple[Term, ...], target: Target,
 ) -> None:
-    """Raise if any term's score moves when only the book's unrealized P&L moves.
+    """Check sunk-cost independence, not independence from current market value.
 
-    Under mark-to-market treatment (`TaxTreatment.marks_to_market`) the result lands
-    in the year's income whether or not the position was closed, so when it closes
-    has no tax consequence and nothing about entry price may reach the decision.
-    Under realization accounting the rule has a narrow carve-out near the year
-    boundary; a term reasoning about that would have to read the flag, and this
-    guard keeps its absence enforced.
-
-    Checked rather than trusted, because the failure is silent: a term that reads
-    P&L produces the disposition effect (Shefrin & Statman 1985), riding losers and
-    cutting winners, while still looking like a risk model. Every term is checked,
-    so a new one cannot opt out by omission.
-
-    The perturbation moves ``credit_received`` and ``cost_to_close`` together in the
-    direction that makes every holding look worse, and leaves the greeks, margin and
-    expiry untouched.
+    Only historical entry premium changes. Today's liquidation value, quantities,
+    capital, sensitivities and action stay fixed. Current value may legitimately
+    affect an action's remaining payoff. Call for every action being evaluated.
+    This is not a tax optimizer; a tax-aware policy needs a different contract.
     """
     from dataclasses import replace
 
     worse = replace(book, holdings=tuple(
-        replace(h, credit_received=h.credit_received * 10,
-                cost_to_close=h.cost_to_close * 10 + Decimal('1000'))
+        replace(h, credit_received=h.credit_received * 10 + Decimal('1000'))
         for h in book.holdings))
     for term in terms:
         before = term.contribute(book, action, target)

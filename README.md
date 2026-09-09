@@ -12,13 +12,14 @@ and puts opening, closing, and doing nothing on one scale.
 - No dependencies. Stdlib and `Decimal`. No pandas, no numpy, no broker SDK, no
   network or disk I/O, and no knowledge of the calling application.
 - Every score carries a plain-language rationale alongside the number.
-- No term may read unrealized P&L. `assert_pnl_blind` perturbs the book's P&L and
-  raises if any term's score moves, so the property is checked rather than assumed.
+- `assert_pnl_blind` checks independence from historical entry cost, holding
+  current liquidation values, exposures and actions fixed. Current value is a
+  legitimate forward-looking input; this guard is not a tax optimizer.
 
 ```python
 from decimal import Decimal as D
 from bookpolicy import (Book, Holding, Greeks, Open, Close, Hold, Target,
-                        DeltaGap, ThetaYield, GammaTheta, TransactionCost, score)
+                        DeltaGap, ThetaYield, TransactionCost, score)
 
 book = Book(
     holdings=(Holding(id='pcs-aug', greeks=Greeks(delta=D('1700'), theta=D('9'),
@@ -28,7 +29,7 @@ book = Book(
 )
 target = Target.like_holding_the_underlying(
     D('30000'), invested_ratio=D('1.0'), band_ratio=D('0.4'))
-terms = (DeltaGap(D('1')), ThetaYield(D('100')), GammaTheta(D('1')), TransactionCost(D('0.01')))
+terms = (DeltaGap(D('1')), ThetaYield(D('100')), TransactionCost(D('0.01')))
 
 candidate = Open('put_credit_spread',
                  greeks=Greeks(delta=D('19200'), theta=D('7')),
@@ -43,8 +44,8 @@ for p in parts:
 # transaction_cost    -0.022  costs $2.24 in fees and crossing
 ```
 
-Every term reports on every call. `gamma_theta` returned `+0.000 "not a close"`
-here and is filtered out above.
+Every term reports on every call. These example weights are not a calibrated
+portfolio utility or an execution recommendation.
 
 `examples/score_a_book.py` runs the full open/close/hold comparison with no data
 source.
@@ -61,16 +62,17 @@ source.
 | `Contribution` | one term's signed value and its rationale |
 | `TaxTreatment` | whether realizing a gain is a choice (see below) |
 | `score(book, action, terms, target)` | `(total, contributions)`, never just the total |
-| `assert_pnl_blind(...)` | raises `PnlLeakError` if any term reads unrealized P&L |
+| `assert_pnl_blind(...)` | raises `PnlLeakError` if a term changes when only entry cost changes |
 
 Bundled terms: `DeltaGap` (distance to target, flat inside the band),
-`ThetaYield` (decay per dollar of capital), `GammaTheta` (exit pressure as gamma
-outruns remaining decay), `TransactionCost`. A term is anything with a `name` and
+`ThetaYield` (local theta per dollar of capital), `GammaTheta` (legacy, uncalibrated
+short-gamma / linear-theta diagnostic), `TransactionCost`. A term is anything with a `name` and
 a `contribute(book, action, target)`, so callers can add their own.
 
 ## Prior work
 
-The terms implement established results rather than new ones:
+These papers motivate the architecture; the terms do not solve their control
+problems or inherit their optimality results:
 
 - No-trade bands (Constantinides 1986; Davis & Norman 1990). With transaction
   costs the optimal policy is not to hold the target exactly but to do nothing
@@ -87,11 +89,12 @@ The terms implement established results rather than new ones:
   guarded against: riding losers and cutting winners, which a P&L-reading term
   reproduces while still looking like a risk model.
 
-`GammaTheta` and the 21-DTE rule: the industry heuristic "manage at 21 DTE" is an
-output of this term rather than an input. The stated reason for the rule is that
-the last three weeks carry disproportionate gamma against the theta still
-collectable, which is a ratio rather than a date. Computing it recovers "close
-near 21 DTE" on typical inputs and adapts when they are not typical.
+`GammaTheta` does not derive a 21-DTE rule. Theta multiplied by time is not an
+expected remaining return, and its ratio with gamma is unit-dependent. The
+legacy diagnostic returns zero for nonpositive theta/tenor or nonnegative gamma;
+those cases imply no economic close benefit. Complete scenario comparisons,
+current value, transaction costs and portfolio constraints belong in an
+application's validated decision model.
 
 ## Two design choices
 

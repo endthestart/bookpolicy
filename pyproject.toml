@@ -1,6 +1,6 @@
 [project]
 name = "bookpolicy"
-version = "0.0.2"
+version = "0.0.3"
 description = "Dependency-free scoring terms for deciding whether to open, close, or hold, given a book of options positions."
 readme = "README.md"
 requires-python = ">=3.12"

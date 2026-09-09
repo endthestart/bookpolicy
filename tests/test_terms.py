@@ -114,13 +114,11 @@ def test_a_close_can_score_as_well_as_an_open():
     assert DeltaGap().contribute(b, Close('a'), target).value > 0
 
 
-# ── GammaTheta: 21 DTE as a ratio, not a date ────────────────────────────────
+# ── GammaTheta: legacy local-sensitivity diagnostic ─────────────────────────
 
 
 def test_pressure_rises_as_expiry_approaches():
-    """The mechanism behind tastytrade's 21-DTE rule: the last weeks carry
-    disproportionate gamma against the decay still available. Same position, fewer
-    days left, more pressure to close."""
+    """A smaller linear-time denominator raises the ratio, not an optimal exit claim."""
     far = _book(_spread('a', gamma='-0.8', theta='12', dte=45))
     near = _book(_spread('a', gamma='-0.8', theta='12', dte=10))
     assert (GammaTheta().contribute(near, Close('a'), Target()).value
@@ -134,10 +132,20 @@ def test_more_gamma_for_the_same_decay_means_more_pressure():
             > GammaTheta().contribute(calm, Close('a'), Target()).value)
 
 
-def test_nothing_left_to_collect_is_a_free_close():
+def test_zero_theta_does_not_imply_a_free_close():
     b = _book(_spread('a', theta='0', gamma='-0.8', dte=3))
     c = GammaTheta().contribute(b, Close('a'), Target())
-    assert c.value == D('1') and 'no decay left' in c.rationale
+    assert c.value == D('0') and 'no economic close benefit' in c.rationale
+
+
+def test_positive_gamma_is_not_short_gamma_exit_pressure():
+    b = _book(_spread('a', theta='12', gamma='0.8', dte=3))
+    assert GammaTheta().contribute(b, Close('a'), Target()).value == 0
+
+
+def test_negative_theta_and_tenor_do_not_create_positive_close_pressure():
+    b = _book(_spread('a', theta='-12', gamma='-0.8', dte=-3))
+    assert GammaTheta().contribute(b, Close('a'), Target()).value == 0
 
 
 def test_it_says_nothing_about_opening():
