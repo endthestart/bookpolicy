@@ -1,7 +1,7 @@
 [project]
 name = "bookpolicy"
-version = "0.0.3"
-description = "Dependency-free scoring terms for deciding whether to open, close, or hold, given a book of options positions."
+version = "0.1.0"
+description = "Dependency-free decisions about opening, closing or holding options positions, judged against the book you already hold."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }

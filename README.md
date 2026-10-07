@@ -1,7 +1,68 @@
 # bookpolicy
 
-Dependency-free scoring for the question "given what I already hold, is this
-action worth taking?" over a book of options positions.
+Dependency-free decisions for the question "given what I already hold, is this
+action worth taking?" over a book of options positions — including the one most
+tools get wrong: **when to close**.
+
+## Deciding whether to close
+
+Exit rules usually read the position alone: take profit at 50%, cut at 2x the
+credit, close at 21 days. They answer the wrong question. Whether a position is
+green or red is sunk cost. What matters is what holding still offers against what it
+can still cost, and what closing does to the rest of the book. A profitable hedge
+can be worth keeping. A spread near maximum loss can be worth keeping too: little is
+left to lose and much can still be won back.
+
+`decide_exit` asks three questions and stops at the first answer:
+
+1. **Is closing dominated?** If closing at the executable price costs at least the
+   worst settlement outcome, holding cannot end worse: hold.
+2. **Does what is left to gain still cover one bad day?** Reward left divided by
+   what one adverse day would cost from here. Time enters through gamma: the same 2%
+   day costs more as expiration nears, so a spread at 20% profit can be worth holding
+   at 30 days and worth closing at 14. (Reward against *loss* left is blind to time:
+   it reads the same at 30, 14 and 7 days.)
+3. **Does closing move the book toward its goals?** Without the holding, the book's
+   dollar delta must not end farther from its target than before, beyond the no-trade
+   band, and its worst stressed loss must not rise. If closing fails either, the
+   holding is protecting the book: hold, and say which.
+
+```python
+from decimal import Decimal as D
+from bookpolicy import (Book, ExitEvidence, ExitPolicy, Greeks, Holding, Target,
+                        decide_exit)
+
+book = Book(holdings=(Holding('condors', Greeks(delta=D('-23888')), D('8000'), 30),
+                      Holding('put-spread', Greeks(delta=D('3877')), D('370'), 28)))
+target = Target(delta=D('7922'), delta_band=D('11091'))
+
+# Signed position values: settles between -$500 and $0; closing costs $103 at the
+# midpoint, $108 at the natural; a 2% adverse day costs $120.
+evidence = ExitEvidence.from_values(
+    settlement_best=D('0'), settlement_worst=D('-500'), close_mid=D('-103'),
+    close_natural=D('-108'), bad_day=D('120'),
+    worst_loss_with=D('4528'), worst_loss_without=D('4528'))
+
+decision = decide_exit(book, 'put-spread', evidence, target, ExitPolicy(D('1')))
+print(decision.verdict, decision.reasons)
+# hold ('closing moves the book away from its goals: delta gap',)
+for check in decision.checks:
+    print(f'  {check.test}: {check.rationale}')
+#   reward left against one bad day: $103.00 left to gain against $120.00 for one bad day: 0.86, threshold 1
+#   delta gap: gap to the $7,922 target $27,933 → $31,810 (band $11,091)
+#   worst stressed loss: worst stressed loss $4,528 → $4,528
+```
+
+The put spread's reward no longer covers a bad day, so on its own it looks like a
+close. But it is the book's only long delta in a book far short of its target:
+closing it would widen the gap. It holds.
+
+The decision says *whether*. *How* — close now, or move a resting profit target —
+is the caller's, since it depends on orders this package never sees. There are no
+probabilities here: reward and loss left are conditional extremes, and the bad day
+is a named scenario, not a forecast.
+
+## Scoring actions against a book
 
 Most options tooling scores a candidate standalone: this spread has a 70%
 probability of profit, that one collects more credit, take the better number. Once
@@ -63,6 +124,9 @@ source.
 | `TaxTreatment` | whether realizing a gain is a choice (see below) |
 | `score(book, action, terms, target)` | `(total, contributions)`, never just the total |
 | `assert_pnl_blind(...)` | raises `PnlLeakError` if a term changes when only entry cost changes |
+| `ExitEvidence` | what closing one holding gives up and costs; `from_values` builds it from signed values |
+| `ExitPolicy` | the reward-to-bad-day threshold, no default |
+| `decide_exit(book, holding_id, evidence, target, policy)` | `ExitDecision`: hold or exit, with every check and its rationale |
 
 Bundled terms: `DeltaGap` (distance to target, flat inside the band),
 `ThetaYield` (local theta per dollar of capital), `GammaTheta` (legacy, uncalibrated

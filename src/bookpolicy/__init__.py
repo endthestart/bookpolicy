@@ -6,6 +6,15 @@ and an action, it hands back a score and the reasoning behind it.
 """
 
 from bookpolicy.errors import BookPolicyError, PnlLeakError, UnknownHoldingError
+from bookpolicy.exits import (
+    Check,
+    ExitDecision,
+    ExitEvidence,
+    ExitEvidenceError,
+    ExitPolicy,
+    Verdict,
+    decide_exit,
+)
 from bookpolicy.terms import (
     DeltaGap,
     GammaTheta,
@@ -29,7 +38,7 @@ from bookpolicy.types import (
     TaxTreatment,
 )
 
-__version__ = '0.0.3'
+__version__ = '0.1.0'
 
 __all__ = [
     # inputs
@@ -37,10 +46,16 @@ __all__ = [
     'Book',
     # errors
     'BookPolicyError',
+    'Check',
     'Close',
     'Contribution',
     # terms
     'DeltaGap',
+    # deciding whether to close
+    'ExitDecision',
+    'ExitEvidence',
+    'ExitEvidenceError',
+    'ExitPolicy',
     'GammaTheta',
     'Greeks',
     'Hold',
@@ -54,9 +69,11 @@ __all__ = [
     'ThetaYield',
     'TransactionCost',
     'UnknownHoldingError',
+    'Verdict',
     '__version__',
     # scoring
     'after',
     'assert_pnl_blind',
+    'decide_exit',
     'score',
 ]
